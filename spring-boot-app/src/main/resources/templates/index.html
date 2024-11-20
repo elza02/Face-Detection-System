@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" href="#">
+    <title>AI Vision Analyzer</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap">
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #f39c12;
+            --background-color: #f8f9fa;
+            --text-color: #333;
+            --border-radius: 12px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: #fff;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+        }
+
+        h1, h2 {
+            text-align: center;
+            color: var(--primary-color);
+        }
+
+        .button-container {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: #fff;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+
+        button:hover {
+            background-color: #3a7bd5;
+            transform: translateY(-2px);
+        }
+
+        button.secondary {
+            background-color: var(--secondary-color);
+        }
+
+        button.secondary:hover {
+            background-color: #e67e22;
+        }
+
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .overlay-content {
+            background-color: #fff;
+            padding: 2rem;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            position: relative;
+            max-width: 90%;
+            max-height: 90%;
+            overflow: auto;
+        }
+
+        .close-btn {
+            position: absolute;
+            z-index: 999;
+            top: 1rem;
+            right: 1rem;
+            background-color: transparent;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-color);
+        }
+
+        video, canvas, #returnedFrame {
+            max-width: 100%;
+            height: auto;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+        }
+
+        #imageUploadForm {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        input[type="file"] {
+            margin-bottom: 1rem;
+        }
+
+        .predictions {
+            margin-top: 2rem;
+            padding: 1rem;
+            background-color: #e9ecef;
+            border-radius: var(--border-radius);
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--primary-color);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+            display: none;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .button-container {
+                flex-direction: column;
+            }
+
+            button:not(.close-btn) {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>AI Vision Analyzer</h1>
+
+    <div class="button-container">
+        <button onclick="startStreaming()">Start Camera Stream</button>
+        <button onclick="showImageUpload()" class="secondary">Upload Image</button>
+    </div>
+    <button onclick="stopStreaming()" class="hidden" id="stopButton">Stop Streaming</button>
+
+    <div id="videoOverlay" class="overlay">
+        <div class="overlay-content">
+<!--            <button onclick="stopStreaming()" class="hidden" id="stopButton">Stop Streaming</button>-->
+            <button class="close-btn" onclick="closeOverlay('videoOverlay')">&times;</button>
+            <video id="video" autoplay></video>
+            <div class="predictions">Waiting for image analysis...</div>
+        </div>
+    </div>
+
+    <div id="uploadOverlay" class="overlay">
+        <div class="overlay-content">
+            <button class="close-btn" onclick="closeOverlay('uploadOverlay')">&times;</button>
+            <form id="imageUploadForm" enctype="multipart/form-data">
+                <label for="imageFile">Choose an image to upload:</label>
+                <input type="file" id="imageFile" name="file" accept="image/*">
+                <button type="button" onclick="uploadImage()">Analyze Image</button>
+            </form>
+        </div>
+    </div>
+
+    <canvas id="canvas" class="hidden"></canvas>
+    <img id="returnedFrame" class="hidden">
+
+    <div id="loader"></div>
+
+    <h2>Analysis Results</h2>
+    <div class="predictions">Waiting for image analysis...</div>
+</div>
+
+<script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const context = canvas.getContext('2d');
+    const returnedFrame = document.getElementById('returnedFrame');
+    const stopButton = document.getElementById('stopButton');
+    const predictionsDivs = document.getElementsByClassName('predictions');
+    const videoOverlay = document.getElementById('videoOverlay');
+    const uploadOverlay = document.getElementById('uploadOverlay');
+    const loader = document.getElementById('loader');
+    let streaming = false;
+    let stream;
+    let captureInterval;
+
+    const ws = new WebSocket("ws://localhost:8080/ws");
+
+    ws.onmessage = function(event) {
+        try {
+            // Log the raw data received
+            console.log('Raw received data:', event.data);
+
+            // Parse the received data as JSON
+            const response = JSON.parse(event.data);
+            console.log('Parsed response:', response);
+
+            let formattedResult = 'Analysis Result:\n';
+
+            // Check if the response object has the 'status' field
+            if (response && response.status) {
+                if (response.status === 'success') {
+                    const data = response.data;
+                    formattedResult += `Name: ${data.name || 'N/A'}\n`;
+                    formattedResult += `Age: ${data.age || 'N/A'}\n`;
+                    formattedResult += `Address: ${data.address || 'N/A'}\n`;
+                    formattedResult += `Job: ${data.job || 'N/A'}`;
+                } else if (response.status === 'error') {
+                    formattedResult += `${response.message || 'Unknown error'}`;
+                } else {
+                    // Handle unexpected response formats
+                    formattedResult += 'Unexpected response format.';
+                }
+            } else {
+                formattedResult += 'Unexpected response format.';
+            }
+
+            Array.from(predictionsDivs).forEach(div => div.innerText = formattedResult);
+        } catch (error) {
+            console.error('Error processing response:', error);
+            Array.from(predictionsDivs).forEach(div => div.innerText = 'Error processing analysis result.');
+        } finally {
+            loader.style.display = 'none';
+        }
+    };
+
+    ws.onopen = function() {
+        console.log("WebSocket connection opened.");
+    };
+
+    ws.onclose = function() {
+        console.log("WebSocket connection closed.");
+    };
+
+    ws.onerror = function(error) {
+        console.log("WebSocket error: ", error);
+        Array.from(predictionsDivs).forEach(div => div.innerText = "Error: Unable to connect to the analysis service.");
+    };
+
+    function startStreaming() {
+        if (navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(function (mediaStream) {
+                    stream = mediaStream;
+                    video.srcObject = mediaStream;
+                    streaming = true;
+                    videoOverlay.style.display = 'flex';
+                    stopButton.classList.remove('hidden');
+                    captureInterval = setInterval(captureAndUploadFrame, 3000);
+                })
+                .catch(function (err) {
+                    console.log("Error accessing the camera: " + err);
+                    alert("Unable to access the camera. Please make sure it's connected and you've granted the necessary permissions.");
+                });
+        }
+    }
+
+    function stopStreaming() {
+        clearInterval(captureInterval);
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+            videoOverlay.style.display = 'none';
+            stopButton.classList.add('hidden');
+        }
+        streaming = false;
+    }
+
+    function showImageUpload() {
+        uploadOverlay.style.display = 'flex';
+    }
+
+    function closeOverlay(overlayId) {
+        document.getElementById(overlayId).style.display = 'none';
+    }
+
+    function captureAndUploadFrame() {
+        if (!streaming) return;
+
+        // Resize canvas to a fixed size
+        canvas.width = 400;
+        canvas.height = 400;
+
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(function(blob) {
+            uploadImageData(blob);
+        }, 'image/jpeg');
+    }
+
+    function uploadImage() {
+        const fileInput = document.getElementById('imageFile');
+        const file = fileInput.files[0];
+        if (!file) {
+            alert("Please select an image to upload.");
+            return;
+        }
+
+        resizeImage(file, 400, 400, function(resizedBlob) {
+            uploadImageData(resizedBlob);
+        });
+        closeOverlay('uploadOverlay');
+    }
+
+    function resizeImage(imageFile, maxWidth, maxHeight, callback) {
+        const reader = new FileReader();
+
+        reader.onload = function(event) {
+            const img = new Image();
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height *= maxWidth / width;
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width *= maxHeight / height;
+                        height = maxHeight;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                ctx.drawImage(img, 0, 0, width, height);
+
+                canvas.toBlob(function(blob) {
+                    callback(blob);
+                }, 'image/jpeg');
+            };
+            img.src = event.target.result;
+        };
+
+        reader.readAsDataURL(imageFile);
+    }
+
+    function uploadImageData(imageData) {
+        const formData = new FormData();
+        formData.append('file', imageData, 'image.jpg');
+
+        loader.style.display = 'block';
+        Array.from(predictionsDivs).forEach(div => div.innerText = 'Analyzing image...');
+
+        fetch('/uploadImage', {
+            method: 'POST',
+            body: formData
+        }).then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            console.log('Image uploaded successfully');
+        }).catch(error => {
+            console.error('Error in image upload:', error);
+            Array.from(predictionsDivs).forEach(div => div.innerText = 'Error: Unable to upload the image for analysis.');
+            loader.style.display = 'none';
+        });
+    }
+
+    window.addEventListener('beforeunload', function() {
+        if (ws) {
+            ws.close();
+        }
+    });
+</script>
+</body>
+</html>

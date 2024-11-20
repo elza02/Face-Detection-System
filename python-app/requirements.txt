@@ -1,0 +1,8 @@
+pyspark==3.4.3
+kafka-python
+tensorflow==2.10.0
+keras==2.10.0
+numpy==1.21.6
+mtcnn
+opencv-python
+pandas
