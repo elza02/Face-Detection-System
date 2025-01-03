@@ -6,3 +6,5 @@ numpy==1.21.6
 mtcnn
 opencv-python
 pandas
+scikit-learn==1.2.2
+torch

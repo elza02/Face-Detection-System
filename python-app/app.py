@@ -9,7 +9,14 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import udf
 from pyspark.sql.types import StructType, StructField, BinaryType, StringType
 import cv2
+import torch
 import json
+import pandas as pd
+import ast
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 
 # Initialize Spark session
 spark = SparkSession.builder \
@@ -22,40 +29,6 @@ spark = SparkSession.builder \
 
 # Path to the TensorFlow Lite model file
 tflite_model_path = '/app/models/latent_model.tflite'
-
-# Predefined image hash dictionary for recognition
-image_hash = {
-    'Ayoub': {
-        'hash': np.array([1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0,0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1,1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0]),
-        'fname': 'Ayoub Boulmeghras',
-        'Age': '21',
-        'Adresse': 'Agadir, Morocoo',
-        'Job': 'Student'
-    },
-    'Akram': {
-        'hash': np.array([0,1,1,0,0,0,1,1,0,1,0,1,1,1,1,0,0,0,0,0,0,0,0,0,1,0,0,1,1,1,1,0,0,1,0,0,0,1,0,0,0,1,1,0,1,0,0,0,1,1,0,0,1,0,1,0,1,0,1,1,0,1,0,0]),
-        'fname': 'Akram EL MOUDEN',
-        'Age': '22',
-        'Adresse': 'Tilila, AGADIR',
-        'Job': 'Student'
-    },
-    'Josef': {
-        'hash': np.array([1,1,1,1,1,1,1,0,0,0,1,0,1,1,1,0,1,1,0,1,1,0,0,0,1,1,1,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0,1,1,0,1,0,1,0,1,0,1,1,1,0,1,1,1,1,0,0,1,1,0]),
-        'fname': 'Josef ABOKAYO',
-        'Age': '29',
-        'Adresse': 'Texas, USA',
-        'Job': 'ML Engineer'
-    },
-    'David': {
-        'hash': np.array([1,1,0,1,1,0,1,0,1,0,0,1,0,0,1,0,1,0,1,0,1,0,0,0,0,0,1,0,0,1,1,0,0,0,1,1,0,0,0,0,1,1,1,0,1,1,1,0,0,1,0,0,0,1,1,1,0,0,0,1,0,1,0,0]),
-        'fname': 'David CHARELETON',
-        'Age': '36',
-        'Adresse': 'NYC, USA',
-        'Job': 'Teacher'
-    }
-    
-}
-
 # Load and broadcast TensorFlow Lite model
 def load_tflite_model(model_path):
     if not os.path.exists(model_path):
@@ -66,7 +39,7 @@ def load_tflite_model(model_path):
 
     return tflite_model
 
-bc_model = spark.sparkContext.broadcast(load_tflite_model(tflite_model_path))
+
 
 # Load and broadcast MTCNN detector
 def get_mtcnn():
@@ -97,9 +70,15 @@ def preprocess_image(image_bytes):
 
     return np.ascontiguousarray(img_t)
 
+# def threshold_predictions(predictions, threshold=0.5):
+#     binary_predictions = np.array(predictions >= threshold, dtype=np.float32)
+#     return binary_predictions
+
 # Perform batch predictions with TensorFlow Lite
+
+bc_model = load_tflite_model(tflite_model_path)
 def predict_batch(images):
-    interpreter = tf.lite.Interpreter(model_content=bc_model.value)
+    interpreter = tf.lite.Interpreter(model_content=bc_model)
     interpreter.allocate_tensors()
     input_details = interpreter.get_input_details()[0]
     output_details = interpreter.get_output_details()[0]
@@ -110,20 +89,56 @@ def predict_batch(images):
         interpreter.invoke()
         predictions.append(interpreter.get_tensor(output_details['index'])[0])
 
+
     return predictions
 
-# Find nearest neighbor from predefined hashes
-def find_nearest_neighbor(prediction):
-    min_distance = float('inf')
-    nearest_neighbor = None
-    for name, data in image_hash.items():
-        distance = np.sum(np.abs(data['hash'] - prediction))
-        if distance < min_distance:
-            min_distance = distance
-            nearest_neighbor = data
-    return nearest_neighbor, min_distance
 
 
+def cosine_similarity(a, b):
+    """Compute cosine similarity between two tensors."""
+    return F.cosine_similarity(a, b, dim=-1)
+
+
+def safe_eval(value):
+    try:
+        return ast.literal_eval(value)
+    except (ValueError, SyntaxError):
+        print(f"Skipping malformed embedding: {value}")
+        return None  # Or provide a default embedding, e.g., [0.0] * 64
+
+
+
+def find_nearest_neighbor(prediction,df_csv):
+    model_embeddings = torch.tensor(np.array(prediction), dtype=torch.float32).unsqueeze(0)  # Shape: (1, 15, 64)
+    similarity = 0
+    matching_row_id = -1
+    for idx, row in df_csv.iterrows():
+        row_embeddings = torch.tensor(np.array(row['embedding']), dtype=torch.float32).unsqueeze(0) 
+        s = cosine_similarity(row_embeddings, model_embeddings) 
+        #print(s , similarity)
+        if s.item() > similarity:
+            similarity = s.item()
+            matching_row_id = idx
+    
+    if matching_row_id + 1 < 10:
+        imageURL = f"/home/zakaria/Downloads/GTdb_crop2/P{matching_row_id + 1}/s0{matching_row_id + 1}_01.jpg"
+    else:
+        imageURL = f"/home/zakaria/Downloads/GTdb_crop2/P{matching_row_id + 1}/s{matching_row_id + 1}_01.jpg"
+
+    data = {
+        's' : similarity,
+        'name' : df_csv.iloc[matching_row_id]['name'] ,
+        'person_id' : matching_row_id + 1,
+        'age' : df_csv.iloc[matching_row_id]['age'].item() ,
+        'nationality' : df_csv.iloc[matching_row_id]['nationality'] ,
+        'job' : df_csv.iloc[matching_row_id]['job'],
+        'imageURL' : imageURL
+
+    }
+    return data, similarity
+
+df_csv = pd.read_csv('/app/embeddings/person_embeddings_combined.csv')
+df_csv['embedding'] = df_csv['embedding'].apply(safe_eval)  
 # UDF for prediction
 def predict_udf(image_bytes):
     try:
@@ -132,17 +147,24 @@ def predict_udf(image_bytes):
             return json.dumps({'status': 'error', 'message': 'No face detected'})
 
         prediction = predict_batch([img])[0]
-        nearest_neighbor, distance = find_nearest_neighbor(prediction)
-
-        if nearest_neighbor and distance < 15:  # Check if distance is less than 15
+        # nearest_neighbor, distance = find_nearest_neighbor(prediction)
+        
+        
+        data, similarity = find_nearest_neighbor(prediction, df_csv)
+        # if nearest_neighbor and distance < 15:  # Check if distance is less than 15
+        if data and similarity > 0.5:  # Check if distance is less than 15
             return json.dumps({
-                'status': 'success',
+                'status': 'success',                                                                                            
                 'data': {
-                    'name': nearest_neighbor.get('fname', 'N/A'),
-                    'age': nearest_neighbor.get('Age', 'N/A'),
-                    'address': nearest_neighbor.get('Adresse', 'N/A'),
-                    'job': nearest_neighbor.get('Job', 'N/A')
+                    'similarity': data.get('s', 'N/A'),
+                    'ID': data.get('person_id', 'N/A'),
+                    'name': data.get('name', 'N/A'),
+                    'age': data.get('age', 'N/A'),
+                    'nationality': data.get('nationality', 'N/A'),
+                    'job': data.get('job', 'N/A'),
+                    'imageURL' : data.get('imageURL', 'N/A'),
                 }
+               
             })
         else:  # If no match or distance >= 15
             return json.dumps({
@@ -153,6 +175,9 @@ def predict_udf(image_bytes):
         return json.dumps({'status': 'error', 'message': str(e)})
 
 predict_udf = udf(predict_udf, StringType())
+
+
+
 
 # Kafka schema
 schema = StructType([
