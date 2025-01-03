@@ -8,9 +8,6 @@ from mtcnn import MTCNN
 import cv2
 import pandas as pd
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 #function to load the model
 def load_tflite_model(model_path):

@@ -7,4 +7,3 @@ mtcnn
 opencv-python
 pandas
 scikit-learn==1.2.2
-torch

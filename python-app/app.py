@@ -9,13 +9,10 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import udf
 from pyspark.sql.types import StructType, StructField, BinaryType, StringType
 import cv2
-import torch
 import json
 import pandas as pd
 import ast
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+
 
 
 # Initialize Spark session
@@ -92,12 +89,11 @@ def predict_batch(images):
 
     return predictions
 
-
-
 def cosine_similarity(a, b):
     """Compute cosine similarity between two tensors."""
-    return F.cosine_similarity(a, b, dim=-1)
-
+    # Note: tf.keras.losses.cosine_similarity returns the negative cosine similarity,
+    # so we use the negative sign to get the positive cosine similarity.
+    return -tf.keras.losses.cosine_similarity(a, b, axis=-1)
 
 def safe_eval(value):
     try:
@@ -106,34 +102,36 @@ def safe_eval(value):
         print(f"Skipping malformed embedding: {value}")
         return None  # Or provide a default embedding, e.g., [0.0] * 64
 
+def find_nearest_neighbor(prediction, df_csv):
+    model_embeddings = tf.convert_to_tensor(np.array(prediction), dtype=tf.float32)  # Shape: (15, 64)
+    model_embeddings = tf.expand_dims(model_embeddings, axis=0)  # Shape: (1, 15, 64)
 
-
-def find_nearest_neighbor(prediction,df_csv):
-    model_embeddings = torch.tensor(np.array(prediction), dtype=torch.float32).unsqueeze(0)  # Shape: (1, 15, 64)
-    similarity = 0
+    similarity = 0.0
     matching_row_id = -1
+
     for idx, row in df_csv.iterrows():
-        row_embeddings = torch.tensor(np.array(row['embedding']), dtype=torch.float32).unsqueeze(0) 
-        s = cosine_similarity(row_embeddings, model_embeddings) 
-        #print(s , similarity)
-        if s.item() > similarity:
-            similarity = s.item()
+        row_embeddings = tf.convert_to_tensor(np.array(row['embedding']), dtype=tf.float32)  # Shape: (15, 64)
+        row_embeddings = tf.expand_dims(row_embeddings, axis=0)  # Shape: (1, 15, 64)
+
+        s = cosine_similarity(row_embeddings, model_embeddings)
+
+        if s.numpy().item() > similarity:
+            similarity = s.numpy().item()
             matching_row_id = idx
-    
+
     if matching_row_id + 1 < 10:
         imageURL = f"/home/zakaria/Downloads/GTdb_crop2/P{matching_row_id + 1}/s0{matching_row_id + 1}_01.jpg"
     else:
         imageURL = f"/home/zakaria/Downloads/GTdb_crop2/P{matching_row_id + 1}/s{matching_row_id + 1}_01.jpg"
 
     data = {
-        's' : similarity,
-        'name' : df_csv.iloc[matching_row_id]['name'] ,
-        'person_id' : matching_row_id + 1,
-        'age' : df_csv.iloc[matching_row_id]['age'].item() ,
-        'nationality' : df_csv.iloc[matching_row_id]['nationality'] ,
-        'job' : df_csv.iloc[matching_row_id]['job'],
-        'imageURL' : imageURL
-
+        's': similarity,
+        'name': df_csv.iloc[matching_row_id]['name'],
+        'person_id': matching_row_id + 1,
+        'age': df_csv.iloc[matching_row_id]['age'].item(),
+        'nationality': df_csv.iloc[matching_row_id]['nationality'],
+        'job': df_csv.iloc[matching_row_id]['job'],
+        'imageURL': imageURL
     }
     return data, similarity
 
