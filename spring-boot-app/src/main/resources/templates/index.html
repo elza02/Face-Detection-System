@@ -148,7 +148,33 @@
             margin: 20px auto;
             display: none;
         }
+        .predictions-container {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 2rem;
+        padding: 1rem;
+        background-color: #e9ecef;
+        border-radius: var(--border-radius);
+        font-size: 1.1rem;
+        text-align: left;
+    }
 
+        .predictions-text {
+            flex: 1;
+            margin-right: 1rem;
+        }
+
+        .predictions-image {
+            flex-shrink: 0;
+            max-width: 150px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+        }
+
+        .hidden-image {
+            display: none;
+        }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -204,8 +230,12 @@
 
     <div id="loader"></div>
 
-    <h2>Analysis Results</h2>
-    <div class="predictions">Waiting for image analysis...</div>
+    <div class="predictions-container">
+        <div class="predictions-text">
+            Waiting for image analysis...
+        </div>
+        <img src='{{data.imageURL}}'id="personImage" class="predictions-image hidden-image" alt="Person Image">
+    </div>
 </div>
 
 <script>
@@ -225,42 +255,48 @@
     const ws = new WebSocket("ws://localhost:8080/ws");
 
     ws.onmessage = function(event) {
-        try {
-            // Log the raw data received
-            console.log('Raw received data:', event.data);
+    try {
+        const response = JSON.parse(event.data);
 
-            // Parse the received data as JSON
-            const response = JSON.parse(event.data);
-            console.log('Parsed response:', response);
+        let formattedResult = 'Analysis Result:\n';
+        const predictionsText = document.querySelector('.predictions-text');
+        const personImage = document.getElementById('personImage');
 
-            let formattedResult = 'Analysis Result:\n';
+        if (response && response.status === 'success') {
+            const data = response.data;
+            formattedResult += `ID: ${data.ID || 'N/A'}\n`;
+            formattedResult += `Name: ${data.name || 'N/A'}\n`;
+            formattedResult += `Age: ${data.age || 'N/A'}\n`;
+            formattedResult += `Nationality: ${data.nationality || 'N/A'}\n`;
+            formattedResult += `Job: ${data.job || 'N/A'}\n`;
+            formattedResult += `Similarity: ${data.similarity || 'N/A'}`;
 
-            // Check if the response object has the 'status' field
-            if (response && response.status) {
-                if (response.status === 'success') {
-                    const data = response.data;
-                    formattedResult += `Name: ${data.name || 'N/A'}\n`;
-                    formattedResult += `Age: ${data.age || 'N/A'}\n`;
-                    formattedResult += `Address: ${data.address || 'N/A'}\n`;
-                    formattedResult += `Job: ${data.job || 'N/A'}`;
-                } else if (response.status === 'error') {
-                    formattedResult += `${response.message || 'Unknown error'}`;
-                } else {
-                    // Handle unexpected response formats
-                    formattedResult += 'Unexpected response format.';
-                }
+            // Update text
+            predictionsText.innerText = formattedResult;
+
+            // Update image if URL exists
+            if (data.imageURL) {
+                // personImage.src = data.imageURL;
+                // document.getElementById("personImage").src = data.imageURL
+                personImage.classList.remove('hidden-image');
             } else {
-                formattedResult += 'Unexpected response format.';
+                personImage.classList.add('hidden-image');
             }
-
-            Array.from(predictionsDivs).forEach(div => div.innerText = formattedResult);
-        } catch (error) {
-            console.error('Error processing response:', error);
-            Array.from(predictionsDivs).forEach(div => div.innerText = 'Error processing analysis result.');
-        } finally {
-            loader.style.display = 'none';
+        } else if (response && response.status === 'error') {
+            predictionsText.innerText = response.message || 'Unknown error';
+            personImage.classList.add('hidden-image');
+        } else {
+            predictionsText.innerText = 'Unexpected response format.';
+            personImage.classList.add('hidden-image');
         }
-    };
+    } catch (error) {
+        console.error('Error processing response:', error);
+        document.querySelector('.predictions-text').innerText = 'Error processing analysis result.';
+    } finally {
+        loader.style.display = 'none';
+    }
+};
+
 
     ws.onopen = function() {
         console.log("WebSocket connection opened.");
