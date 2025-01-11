@@ -3,18 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="shortcut icon" href="#">
-    <title>AI Vision Analyzer</title>
+    <title>Face Recognition System</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap">
     <style>
         :root {
-            --primary-color: #4a90e2;
-            --secondary-color: #f39c12;
-            --background-color: #f8f9fa;
-            --text-color: #333;
-            --border-radius: 12px;
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+            --background-color: #f5f6fa;
+            --text-color: #2c3e50;
+            --border-radius: 10px;
             --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
 
         body {
@@ -22,424 +26,362 @@
             background-color: var(--background-color);
             color: var(--text-color);
             line-height: 1.6;
-            margin: 0;
-            padding: 0;
         }
 
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             margin: 2rem auto;
             padding: 2rem;
-            background-color: #fff;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            color: var(--primary-color);
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        .video-container, .results-container {
+            background: white;
+            padding: 1.5rem;
             border-radius: var(--border-radius);
             box-shadow: var(--box-shadow);
         }
 
-        h1, h2 {
+        .video-container {
             text-align: center;
-            color: var(--primary-color);
         }
 
-        .button-container {
+        #videoElement {
+            width: 100%;
+            max-width: 640px;
+            border-radius: var(--border-radius);
+            margin-bottom: 1rem;
+        }
+
+        .controls {
             display: flex;
             justify-content: center;
             gap: 1rem;
-            margin-bottom: 2rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
         }
 
         button {
-            background-color: var(--primary-color);
-            color: #fff;
+            background-color: var(--accent-color);
+            color: white;
             border: none;
             padding: 0.75rem 1.5rem;
             border-radius: var(--border-radius);
             cursor: pointer;
-            font-size: 1rem;
-            font-weight: 600;
-            transition: var(--transition);
-        }
-
-        button:hover {
-            background-color: #3a7bd5;
-            transform: translateY(-2px);
+            font-weight: 500;
+            transition: all 0.3s ease;
+            min-width: 150px;
         }
 
         button.secondary {
-            background-color: var(--secondary-color);
-        }
-
-        button.secondary:hover {
             background-color: #e67e22;
         }
 
-        .overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-
-        .overlay-content {
-            background-color: #fff;
-            padding: 2rem;
-            border-radius: var(--border-radius);
-            box-shadow: var(--box-shadow);
-            position: relative;
-            max-width: 90%;
-            max-height: 90%;
-            overflow: auto;
-        }
-
-        .close-btn {
-            position: absolute;
-            z-index: 999;
-            top: 1rem;
-            right: 1rem;
-            background-color: transparent;
-            border: none;
-            font-size: 1.5rem;
-            cursor: pointer;
-            color: var(--text-color);
-        }
-
-        video, canvas, #returnedFrame {
-            max-width: 100%;
-            height: auto;
-            border-radius: var(--border-radius);
+        button:hover {
+            transform: translateY(-2px);
             box-shadow: var(--box-shadow);
         }
 
-        #imageUploadForm {
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .results-container {
             display: flex;
             flex-direction: column;
-            align-items: center;
         }
 
-        input[type="file"] {
+        .results-header {
             margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid var(--background-color);
         }
 
-        .predictions {
-            margin-top: 2rem;
-            padding: 1rem;
-            background-color: #e9ecef;
-            border-radius: var(--border-radius);
-            font-size: 1.1rem;
-            text-align: center;
+        .results-content {
+            display: flex;
+            gap: 1.5rem;
+            align-items: flex-start;
         }
-
-        .hidden {
-            display: none;
-        }
-
-        #loader {
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid var(--primary-color);
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-            display: none;
-        }
-        .predictions-container {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-top: 2rem;
-        padding: 1rem;
-        background-color: #e9ecef;
-        border-radius: var(--border-radius);
-        font-size: 1.1rem;
-        text-align: left;
-    }
 
         .predictions-text {
             flex: 1;
-            margin-right: 1rem;
+            font-family: monospace;
+            white-space: pre-wrap;
+            background-color: var(--background-color);
+            padding: 1rem;
+            border-radius: var(--border-radius);
+            margin-bottom: 1rem;
         }
 
-        .predictions-image {
-            flex-shrink: 0;
-            max-width: 150px;
+        .person-image {
+            width: 200px;
             border-radius: var(--border-radius);
             box-shadow: var(--box-shadow);
+            display: none;
+            transition: all 0.3s ease;
         }
 
-        .hidden-image {
-            display: none;
+        .person-image.visible {
+            display: block;
         }
+
+        #loader {
+            display: none;
+            text-align: center;
+            margin: 1rem 0;
+        }
+
+        .loader-spinner {
+            border: 4px solid var(--background-color);
+            border-top: 4px solid var(--accent-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        .upload-form {
+            display: none;
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: var(--background-color);
+            border-radius: var(--border-radius);
+        }
+
+        .upload-form.visible {
+            display: block;
+        }
+
+        .upload-form input[type="file"] {
+            margin: 1rem 0;
+        }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
 
         @media (max-width: 768px) {
-            .container {
-                padding: 1rem;
+            .content {
+                grid-template-columns: 1fr;
             }
-
-            .button-container {
+            .results-content {
                 flex-direction: column;
             }
-
-            button:not(.close-btn) {
+            .person-image {
                 width: 100%;
+                max-width: 200px;
+                margin: 0 auto;
             }
         }
     </style>
 </head>
 <body>
-<div class="container">
-    <h1>AI Vision Analyzer</h1>
-
-    <div class="button-container">
-        <button onclick="startStreaming()">Start Camera Stream</button>
-        <button onclick="showImageUpload()" class="secondary">Upload Image</button>
-    </div>
-    <button onclick="stopStreaming()" class="hidden" id="stopButton">Stop Streaming</button>
-
-    <div id="videoOverlay" class="overlay">
-        <div class="overlay-content">
-<!--            <button onclick="stopStreaming()" class="hidden" id="stopButton">Stop Streaming</button>-->
-            <button class="close-btn" onclick="closeOverlay('videoOverlay')">&times;</button>
-            <video id="video" autoplay></video>
-            <div class="predictions">Waiting for image analysis...</div>
+    <div class="container">
+        <div class="header">
+            <h1>Face Recognition System</h1>
+        </div>
+        
+        <div class="content">
+            <div class="video-container">
+                <video id="videoElement" autoplay></video>
+                <div class="controls">
+                    <button onclick="startStreaming()" id="startBtn">Start Camera</button>
+                    <button onclick="stopStreaming()" id="stopBtn" disabled>Stop Camera</button>
+                    <button onclick="toggleUploadForm()" class="secondary" id="uploadBtn">Upload Image</button>
+                </div>
+                <div class="upload-form" id="uploadForm">
+                    <input type="file" id="imageFile" accept="image/*">
+                    <button onclick="uploadImage()" class="secondary">Analyze Image</button>
+                </div>
+            </div>
+            
+            <div class="results-container">
+                <div class="results-header">
+                    <h2>Recognition Results</h2>
+                </div>
+                <div class="results-content">
+                    <div class="predictions-text">Waiting for camera stream...</div>
+                    <img id="personImage" class="person-image" alt="Identified Person">
+                </div>
+                <div id="loader">
+                    <div class="loader-spinner"></div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div id="uploadOverlay" class="overlay">
-        <div class="overlay-content">
-            <button class="close-btn" onclick="closeOverlay('uploadOverlay')">&times;</button>
-            <form id="imageUploadForm" enctype="multipart/form-data">
-                <label for="imageFile">Choose an image to upload:</label>
-                <input type="file" id="imageFile" name="file" accept="image/*">
-                <button type="button" onclick="uploadImage()">Analyze Image</button>
-            </form>
-        </div>
-    </div>
-
-    <canvas id="canvas" class="hidden"></canvas>
-    <img id="returnedFrame" class="hidden">
-
-    <div id="loader"></div>
-
-    <div class="predictions-container">
-        <div class="predictions-text">
-            Waiting for image analysis...
-        </div>
-        <img src='{{data.imageURL}}'id="personImage" class="predictions-image hidden-image" alt="Person Image">
-    </div>
-</div>
-
-<script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const context = canvas.getContext('2d');
-    const returnedFrame = document.getElementById('returnedFrame');
-    const stopButton = document.getElementById('stopButton');
-    const predictionsDivs = document.getElementsByClassName('predictions');
-    const videoOverlay = document.getElementById('videoOverlay');
-    const uploadOverlay = document.getElementById('uploadOverlay');
-    const loader = document.getElementById('loader');
-    let streaming = false;
-    let stream;
-    let captureInterval;
-
-    const ws = new WebSocket("ws://localhost:8080/ws");
-
-    ws.onmessage = function(event) {
-    try {
-        const response = JSON.parse(event.data);
-
-        let formattedResult = 'Analysis Result:\n';
-        const predictionsText = document.querySelector('.predictions-text');
-        const personImage = document.getElementById('personImage');
-
-        if (response && response.status === 'success') {
-            const data = response.data;
-            formattedResult += `ID: ${data.ID || 'N/A'}\n`;
-            formattedResult += `Name: ${data.name || 'N/A'}\n`;
-            formattedResult += `Age: ${data.age || 'N/A'}\n`;
-            formattedResult += `Nationality: ${data.nationality || 'N/A'}\n`;
-            formattedResult += `Job: ${data.job || 'N/A'}\n`;
-            formattedResult += `Similarity: ${data.similarity || 'N/A'}`;
-
-            // Update text
-            predictionsText.innerText = formattedResult;
-
-            // Update image if URL exists
-            if (data.imageURL) {
-                // personImage.src = data.imageURL;
-                // document.getElementById("personImage").src = data.imageURL
-                personImage.classList.remove('hidden-image');
-            } else {
-                personImage.classList.add('hidden-image');
-            }
-        } else if (response && response.status === 'error') {
-            predictionsText.innerText = response.message || 'Unknown error';
-            personImage.classList.add('hidden-image');
-        } else {
-            predictionsText.innerText = 'Unexpected response format.';
-            personImage.classList.add('hidden-image');
-        }
-    } catch (error) {
-        console.error('Error processing response:', error);
-        document.querySelector('.predictions-text').innerText = 'Error processing analysis result.';
-    } finally {
-        loader.style.display = 'none';
-    }
-};
-
-
-    ws.onopen = function() {
-        console.log("WebSocket connection opened.");
-    };
-
-    ws.onclose = function() {
-        console.log("WebSocket connection closed.");
-    };
-
-    ws.onerror = function(error) {
-        console.log("WebSocket error: ", error);
-        Array.from(predictionsDivs).forEach(div => div.innerText = "Error: Unable to connect to the analysis service.");
-    };
-
-    function startStreaming() {
-        if (navigator.mediaDevices.getUserMedia) {
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(function (mediaStream) {
-                    stream = mediaStream;
-                    video.srcObject = mediaStream;
-                    streaming = true;
-                    videoOverlay.style.display = 'flex';
-                    stopButton.classList.remove('hidden');
-                    captureInterval = setInterval(captureAndUploadFrame, 3000);
-                })
-                .catch(function (err) {
-                    console.log("Error accessing the camera: " + err);
-                    alert("Unable to access the camera. Please make sure it's connected and you've granted the necessary permissions.");
-                });
-        }
-    }
-
-    function stopStreaming() {
-        clearInterval(captureInterval);
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-            video.srcObject = null;
-            videoOverlay.style.display = 'none';
-            stopButton.classList.add('hidden');
-        }
-        streaming = false;
-    }
-
-    function showImageUpload() {
-        uploadOverlay.style.display = 'flex';
-    }
-
-    function closeOverlay(overlayId) {
-        document.getElementById(overlayId).style.display = 'none';
-    }
-
-    function captureAndUploadFrame() {
-        if (!streaming) return;
-
-        // Resize canvas to a fixed size
-        canvas.width = 400;
-        canvas.height = 400;
-
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(function(blob) {
-            uploadImageData(blob);
-        }, 'image/jpeg');
-    }
-
-    function uploadImage() {
-        const fileInput = document.getElementById('imageFile');
-        const file = fileInput.files[0];
-        if (!file) {
-            alert("Please select an image to upload.");
-            return;
-        }
-
-        resizeImage(file, 400, 400, function(resizedBlob) {
-            uploadImageData(resizedBlob);
-        });
-        closeOverlay('uploadOverlay');
-    }
-
-    function resizeImage(imageFile, maxWidth, maxHeight, callback) {
-        const reader = new FileReader();
-
-        reader.onload = function(event) {
-            const img = new Image();
-            img.onload = function() {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-
-                let width = img.width;
-                let height = img.height;
-
-                if (width > height) {
-                    if (width > maxWidth) {
-                        height *= maxWidth / width;
-                        width = maxWidth;
-                    }
-                } else {
-                    if (height > maxHeight) {
-                        width *= maxHeight / height;
-                        height = maxHeight;
-                    }
+    <script>
+        let streaming = false;
+        let stream;
+        let captureInterval;
+        const CAPTURE_INTERVAL = 1000; // 1000ms = 1 second
+        
+        const ws = new WebSocket("ws://localhost:8080/ws");
+        
+        ws.onmessage = function(event) {
+            try {
+                const response = JSON.parse(event.data);
+                console.log(response);
+                const predictionsText = document.querySelector('.predictions-text');
+                const personImage = document.getElementById('personImage');
+                
+                if (response.status === 'processing') {
+                    // Don't clear previous results during processing
+                    return;
                 }
-
-                canvas.width = width;
-                canvas.height = height;
-                ctx.drawImage(img, 0, 0, width, height);
-
-                canvas.toBlob(function(blob) {
-                    callback(blob);
-                }, 'image/jpeg');
-            };
-            img.src = event.target.result;
+                
+                if (response.status === 'success' && response.data) {
+                    const data = response.data;
+                    let result = 'Recognition Results:\n';
+                    result += `ID: ${data.ID}\n`;
+                    result += `Name: ${data.name}\n`;
+                    result += `Age: ${data.age}\n`;
+                    result += `Nationality: ${data.nationality}\n`;
+                    result += `Job: ${data.job}\n`;
+                    result += `Confidence: ${data.similarity}`;
+                    
+                    predictionsText.innerText = result;
+                    
+                    // Update person image only on successful prediction
+                    if (data.imageURL) {
+                        personImage.src = 'http://localhost:8080/faces_dataset/' + data.imageURL;
+                        personImage.classList.add('visible');
+                    }
+                } else if (response.status === 'error') {
+                    // Only clear display on actual errors, not during processing
+                    console.log(response);
+                    predictionsText.innerText = response.message || 'Error detecting face';
+                    personImage.classList.remove('visible');
+                }
+            } catch (error) {
+                console.error('Error processing response:', error);
+                document.querySelector('.predictions-text').innerText = 'Error processing results.';
+                document.getElementById('personImage').classList.remove('visible');
+            }
+            document.getElementById('loader').style.display = 'none';
         };
 
-        reader.readAsDataURL(imageFile);
-    }
+        ws.onopen = function() {
+            console.log('WebSocket Connected');
+        };
 
-    function uploadImageData(imageData) {
-        const formData = new FormData();
-        formData.append('file', imageData, 'image.jpg');
+        ws.onclose = function() {
+            console.log('WebSocket Disconnected');
+            stopStreaming();
+        };
 
-        loader.style.display = 'block';
-        Array.from(predictionsDivs).forEach(div => div.innerText = 'Analyzing image...');
+        ws.onerror = function(error) {
+            console.error('WebSocket Error:', error);
+            stopStreaming();
+        };
 
-        fetch('/uploadImage', {
-            method: 'POST',
-            body: formData
-        }).then(response => {
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-            console.log('Image uploaded successfully');
-        }).catch(error => {
-            console.error('Error in image upload:', error);
-            Array.from(predictionsDivs).forEach(div => div.innerText = 'Error: Unable to upload the image for analysis.');
-            loader.style.display = 'none';
-        });
-    }
-
-    window.addEventListener('beforeunload', function() {
-        if (ws) {
-            ws.close();
+        function toggleUploadForm() {
+            const form = document.getElementById('uploadForm');
+            form.classList.toggle('visible');
         }
-    });
-</script>
+
+        async function startStreaming() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.getElementById('videoElement');
+                video.srcObject = stream;
+                streaming = true;
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('uploadBtn').disabled = true;
+                
+                captureInterval = setInterval(captureAndUploadFrame, CAPTURE_INTERVAL);
+            } catch (err) {
+                console.error('Error accessing camera:', err);
+                alert('Error accessing camera. Please make sure you have a camera connected and have granted permission to use it.');
+            }
+        }
+
+        function stopStreaming() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                document.getElementById('videoElement').srcObject = null;
+            }
+            clearInterval(captureInterval);
+            streaming = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('uploadBtn').disabled = false;
+            document.querySelector('.predictions-text').innerText = 'Camera stopped.';
+            document.getElementById('personImage').classList.remove('visible');
+        }
+
+        function uploadImage() {
+            const fileInput = document.getElementById('imageFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select an image to upload');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function() {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(reader.result);
+                    document.getElementById('loader').style.display = 'block';
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function captureAndUploadFrame() {
+            if (!streaming) return;
+            
+            const video = document.getElementById('videoElement');
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            canvas.toBlob(uploadImageData, 'image/jpeg', 0.8);
+            document.getElementById('loader').style.display = 'block';
+        }
+
+        function uploadImageData(blob) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('WebSocket is not connected');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function() {
+                ws.send(reader.result);
+            };
+            reader.readAsArrayBuffer(blob);
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (ws) ws.close();
+            stopStreaming();
+        });
+    </script>
 </body>
 </html>

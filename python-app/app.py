@@ -4,7 +4,6 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.applications.vgg16 import preprocess_input
 from tensorflow.keras.utils import img_to_array
-from mtcnn import MTCNN
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import udf
 from pyspark.sql.types import StructType, StructField, BinaryType, StringType
@@ -12,51 +11,108 @@ import cv2
 import json
 import pandas as pd
 import ast
-import time
-import logging
 import faiss
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Initialize Spark session
+# Initialize Spark session with optimized settings
 spark = SparkSession.builder \
     .appName("KafkaSparkIntegration") \
     .config("spark.executor.memory", "4g") \
     .config("spark.executor.cores", "2") \
     .config("spark.driver.memory", "4g") \
     .config("spark.driver.cores", "2") \
-    .config("spark.logConf", "true") \
+    .config("spark.sql.shuffle.partitions", "8") \
+    .config("spark.default.parallelism", "8") \
+    .config("spark.streaming.kafka.consumer.cache.enabled", "true") \
+    .config("spark.streaming.kafka.maxRatePerPartition", "100") \
+    .config("spark.streaming.backpressure.enabled", "true") \
+    .config("spark.streaming.kafka.consumer.poll.ms", "512") \
+    .config("spark.memory.offHeap.enabled", "true") \
+    .config("spark.memory.offHeap.size", "2g") \
     .getOrCreate()
+
+# Initialize face cascade
+face_cascade = None
+def get_face_cascade():
+    global face_cascade
+    if face_cascade is None:
+        cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        if not os.path.exists(cascade_path):
+            raise FileNotFoundError(f"Haar cascade file not found at {cascade_path}")
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+    return face_cascade
 
 # Path to the TensorFlow Lite model file
 tflite_model_path = '/app/models/latent_model.tflite'
+
 # Load and broadcast TensorFlow Lite model
 def load_tflite_model(model_path):
     if not os.path.exists(model_path):
         raise FileNotFoundError("Model file not found")
-
     with open(model_path, 'rb') as f:
         tflite_model = f.read()
-
     return tflite_model
 
+# Preprocess image for prediction
+def preprocess_image(image_bytes):
+    """Preprocess an image and perform face detection using Haar Cascade."""
+    try:
+        # Convert bytes to numpy array
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
 
+        # Convert to grayscale for Haar Cascade
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # Get face cascade classifier
+        cascade = get_face_cascade()
+        
+        # Detect faces
+        faces = cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(30, 30)
+        )
+        
+        if len(faces) == 0:
+            return None
+            
+        # Get the largest face if multiple faces are detected
+        if len(faces) > 1:
+            faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
+        
+        x, y, w, h = faces[0]
+        face_img = img[y:y+h, x:x+w]
+        
+        # Resize and preprocess for the model
+        face_img = cv2.resize(face_img, (224, 224))
+        face_img = img_to_array(face_img)
+        face_img = np.expand_dims(face_img, axis=0)
+        face_img = preprocess_input(face_img)
+        
+        return np.ascontiguousarray(face_img)
+        
+    except Exception as e:
+        print(f"Error in preprocess_image: {str(e)}")
+        return None
 
-# Load and broadcast MTCNN detector
-def get_mtcnn():
-    return MTCNN()
+# Load TFLite model content
+bc_model = load_tflite_model(tflite_model_path)
 
+def predict_single(image, interpreter, input_details, output_details):
+    """Generate embedding for a single image using TFLite model."""
+    interpreter.set_tensor(input_details['index'], image)
+    interpreter.invoke()
+    return interpreter.get_tensor(output_details['index'])[0]
 
-class HaarCascadeClassifier:
-    _instance = None
+def cosine_similarity(a, b):
+    """Compute cosine similarity between two tensors."""
+    return -tf.keras.losses.cosine_similarity(a, b, axis=-1)
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            )
-        return cls._instance
 def safe_eval(value):
+    """Safely evaluate string representation of embeddings."""
     try:
         return ast.literal_eval(value)
     except (ValueError, SyntaxError):
@@ -66,96 +122,15 @@ def safe_eval(value):
 df_csv = pd.read_csv('/app/embeddings/person_embeddings_combined.csv')
 
 # Convert the 'embedding' column from strings to NumPy arrays
-df_csv['embedding'] = df_csv['embedding'].apply(ast.literal_eval)
-
+df_csv['embedding'] = df_csv['embedding'].apply(safe_eval)
+    
 # Convert the list of embeddings to a NumPy array
 embeddings = np.array(df_csv['embedding'].tolist(), dtype=np.float32)
 
 # Normalize the embeddings (optional but recommended for cosine similarity)
 embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-# df_csv['embedding'] = df_csv['embedding'].apply(safe_eval) 
 # Load embeddings from CSV
-
-
-def preprocess_image(image_bytes):
-    start_time = time.time()
-
-    # Decode the image bytes into a NumPy array
-    np_arr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    if img is None:
-        logging.error("Failed to decode image")
-        return None
-
-    # Convert the image to grayscale for face detection
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Use the singleton Haar Cascade classifier
-    face_cascade = HaarCascadeClassifier()
-
-    # Detect faces using Haar Cascade
-    faces = face_cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,  # Scale factor for multi-scale detection
-        minNeighbors=5,   # Minimum number of neighbors for a region to be considered a face
-        minSize=(30, 30)  # Minimum face size
-    )
-
-    # If no faces are detected, return None
-    if len(faces) == 0:
-        logging.warning("No faces detected")
-        return None
-
-    # Extract the first detected face
-    (x, y, width, height) = faces[0]
-
-    # Crop the face region
-    img_t = img[y:y + height, x:x + width]
-
-    # Resize the face region to 224x224 (required for VGG16 preprocessing)
-    img_t = cv2.resize(img_t, (224, 224))
-
-    # Convert the image to an array and preprocess it for VGG16
-    img_t = img_to_array(img_t)
-    img_t = np.expand_dims(img_t, axis=0)
-    img_t = preprocess_input(img_t)
-
-    end_time = time.time()
-    logging.info(f"preprocess_image took {end_time - start_time:.4f} seconds")
-
-    return np.ascontiguousarray(img_t)
-
-bc_model = load_tflite_model(tflite_model_path)
-def predict_batch(images):
-    start_time = time.time()
-    interpreter = tf.lite.Interpreter(model_content=bc_model)
-    interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()[0]
-    output_details = interpreter.get_output_details()[0]
-
-    predictions = []
-    for img in images:
-        interpreter.set_tensor(input_details['index'], img)
-        interpreter.invoke()
-        predictions.append(interpreter.get_tensor(output_details['index'])[0])
-
-    end_time = time.time()
-    logging.info(f"predict_batch {end_time - start_time:.4f} seconds")
-
-    return predictions
-
-# def cosine_similarity(a, b):
-#     """Compute cosine similarity between two tensors."""
-#     # Note: tf.keras.losses.cosine_similarity returns the negative cosine similarity,
-#     # so we use the negative sign to get the positive cosine similarity.
-#     return -tf.keras.losses.cosine_similarity(a, b, axis=-1)
-
-
-
-
-
-
-
+    
 # Build FAISS index
 dimension = embeddings.shape[1]
 
@@ -165,34 +140,12 @@ index = faiss.IndexFlatIP(dimension)
 # Add the embeddings to the index
 index.add(embeddings)
 
-# def find_nearest_neighbor(prediction, index, df_csv):
-#     start_time = time.time()
-#     prediction = np.array(prediction, dtype=np.float32).reshape(1, -1)
-#     distances, indices = index.search(prediction, 1)  # Find the nearest neighbor
-#     matching_row_id = indices[0][0]
-#     similarity = 1 / (1 + distances[0][0])  # Convert L2 distance to similarity
-
-#     # Retrieve person information
-#     data = {
-#         's': similarity,
-#         'name': df_csv.iloc[matching_row_id]['name'],
-#         'person_id': matching_row_id + 1,
-#         'age': df_csv.iloc[matching_row_id]['age'].item(),
-#         'nationality': df_csv.iloc[matching_row_id]['nationality'],
-#         'job': df_csv.iloc[matching_row_id]['job'],
-#         'imageURL': f"/path/to/images/P{matching_row_id + 1}/s{matching_row_id + 1}_01.jpg"
-#     }
-
-#     end_time = time.time()
-#     logging.info(f"find_nearest_neighbor took {end_time - start_time:.4f} seconds")
-#     return data, similarity
-
-def find_nearest_neighbor(query_vector, index, df_csv, k=1):
+def find_nearest_neighbor(prediction, index, df_csv, k=1):
     """
     Find the nearest neighbor using FAISS.
 
     Args:
-        query_vector (np.array): The query vector (model's output).
+        prediction (np.array): The query vector (model's output).
         index (faiss.Index): The FAISS index.
         df_csv (pd.DataFrame): The CSV data with person information.
         k (int): Number of nearest neighbors to retrieve.
@@ -201,17 +154,22 @@ def find_nearest_neighbor(query_vector, index, df_csv, k=1):
         dict: Information about the nearest neighbor.
     """
     # Normalize the query vector
-    query_vector = query_vector / np.linalg.norm(query_vector)
+    prediction = prediction / np.linalg.norm(prediction)
 
     # Reshape the query vector to match FAISS input format
-    query_vector = np.array([query_vector], dtype=np.float32)
+    prediction = np.array([prediction], dtype=np.float32)
 
     # Perform the search
-    distances, indices = index.search(query_vector, k)
+    distances, indices = index.search(prediction, k)
 
     # Retrieve the nearest neighbor's information
     matching_row_id = indices[0][0]
     similarity = float(distances[0][0])  # Convert float32 to native float
+
+    if matching_row_id + 1 < 10:
+        imageURL = f"/s0{matching_row_id + 1}/01.jpg"
+    else:
+        imageURL = f"/s{matching_row_id + 1}/01.jpg"
 
     # Get person information from the CSV
     data = {
@@ -221,60 +179,54 @@ def find_nearest_neighbor(query_vector, index, df_csv, k=1):
         'age': int(df_csv.iloc[matching_row_id]['age']),  # Convert to native int
         'nationality': df_csv.iloc[matching_row_id]['nationality'],
         'job': df_csv.iloc[matching_row_id]['job'],
-        'imageURL': f"/path/to/images/P{matching_row_id + 1}/s{matching_row_id + 1}_01.jpg"
+        'imageURL': imageURL
     }
 
-    return data, similarity 
- 
-# UDF for prediction
+    return data, similarity
+
+df_csv = pd.read_csv('/app/embeddings/person_embeddings_combined.csv')
+df_csv['embedding'] = df_csv['embedding'].apply(safe_eval)  
+
 def predict_udf(image_bytes):
-    start_time = time.time()
     try:
-        # Preprocess the image using Haar Cascade
+        # Initialize TFLite interpreter for this worker
+        interpreter = tf.lite.Interpreter(model_content=bc_model)
+        interpreter.allocate_tensors()
+        input_details = interpreter.get_input_details()[0]
+        output_details = interpreter.get_output_details()[0]
+
         img = preprocess_image(image_bytes)
         if img is None:
             return json.dumps({'status': 'error', 'message': 'No face detected'})
 
-        # Perform prediction
-        prediction = predict_batch([img])[0]
-
-        # Find the nearest neighbor
+        prediction = predict_single(img, interpreter, input_details, output_details)
+        
         data, similarity = find_nearest_neighbor(prediction, index, df_csv)
-
-        if data and similarity > 0.5:  # Check if similarity is greater than 0.5
-            end_time = time.time()
-            logging.info(f"predict_udf took {end_time - start_time:.4f} seconds")
-
+        if data and similarity > 0.5: 
             return json.dumps({
-                'status': 'success',
+                'status': 'success',                                                                                            
                 'data': {
-                    'similarity': data.get('s', 'N/A'),
-                    'ID': data.get('person_id', 'N/A'),
-                    'name': data.get('name', 'N/A'),
-                    'age': data.get('age', 'N/A'),
-                    'nationality': data.get('nationality', 'N/A'),
-                    'job': data.get('job', 'N/A'),
-                    'imageURL': data.get('imageURL', 'N/A'),
+                    'ID': data['person_id'],
+                    'name': data['name'],
+                    'age': data['age'],
+                    'nationality': data['nationality'],
+                    'job': data['job'],
+                    'similarity': f"{similarity:.2%}",
+                    'imageURL': data['imageURL']
                 }
             })
-        else:  # If no match or similarity <= 0.5
-            end_time = time.time()
-            logging.info(f"predict_udf took {end_time - start_time:.4f} seconds")
-
+        else:  
             return json.dumps({
                 'status': 'error',
                 'message': 'The person does not exist in the dataset or is not a close match'
             })
     except Exception as e:
-        end_time = time.time()
-        logging.info(f"predict_udf took {end_time - start_time:.4f} seconds")
-
-        return json.dumps({'status': 'error', 'message': str(e)})
+        return json.dumps({
+            'status': 'error',
+            'message': str(e)
+        })
 
 predict_udf = udf(predict_udf, StringType())
-
-
-
 
 # Kafka schema
 schema = StructType([
@@ -302,8 +254,3 @@ query = predictions_df \
     .start()
 
 spark.streams.awaitAnyTermination()
-
-
-
-
-
