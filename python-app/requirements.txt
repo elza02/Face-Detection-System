@@ -7,3 +7,4 @@ mtcnn
 opencv-python
 pandas
 scikit-learn==1.2.2
+faiss-cpu==1.7.4
