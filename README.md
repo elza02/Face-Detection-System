@@ -1,3 +1,5 @@
+# Project architecture
+![architecture_gen](https://github.com/user-attachments/assets/2ebae8ad-a2e0-4e8c-97cf-1b0b88954186)
 # Instructions to Run the Project
 ## Prerequisites
 - Docker: Ensure Docker is installed. If not, download it from Docker's official website.
@@ -35,6 +37,5 @@ mvn clean install
 mvn spring-boot:run
    ```
 4. The Spring Boot app will be running at: **http://localhost:8080**
-# Project architecture
-![architecture_gen](https://github.com/user-attachments/assets/2ebae8ad-a2e0-4e8c-97cf-1b0b88954186)
+
 
