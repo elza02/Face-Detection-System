@@ -1,5 +1,5 @@
 # Project architecture
-![architecture_gen](https://github.com/user-attachments/assets/2ebae8ad-a2e0-4e8c-97cf-1b0b88954186)
+![arch](https://github.com/user-attachments/assets/7ef9f13d-63cf-457f-a580-37fa11ad5257)
 # Instructions to Run the Project
 ## Prerequisites
 - Docker: Ensure Docker is installed. If not, download it from Docker's official website.
